@@ -1,10 +1,10 @@
 import 'dotenv/config';
 import { Module } from '@nestjs/common';
 import { AuthModule } from './auth/auth.module.js';
-import { PrismaModule } from './prisma/prisma.module.js';
+import { StorageModule } from './storage/storage.module.js';
 import { TransactionsModule } from './transactions/transactions.module.js';
 
 @Module({
-  imports: [PrismaModule, AuthModule, TransactionsModule],
+  imports: [StorageModule, AuthModule, TransactionsModule],
 })
 export class AppModule {}

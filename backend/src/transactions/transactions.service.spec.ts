@@ -1,6 +1,6 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
-import type { PrismaService } from '../prisma/prisma.service.js';
+import { GeminiDescriptionService } from '../ai/gemini-description.service.js';
+import type { WalletStorage } from '../storage/wallet-storage.js';
 import { TransactionsService } from './transactions.service.js';
 
 const owner = { id: 'user-1', email: 'owner@example.com' };
@@ -8,112 +8,118 @@ const amountDto = (amount: number) => ({ amount });
 
 describe('TransactionsService', () => {
   let service: TransactionsService;
-  let prisma: {
-    user: {
-      findUnique: jest.Mock;
-      update: jest.Mock;
-      updateMany: jest.Mock;
-    };
-    transaction: {
-      create: jest.Mock;
-      findMany: jest.Mock;
-    };
-    $transaction: jest.Mock;
-  };
-  let tx: {
-    user: { update: jest.Mock; updateMany: jest.Mock };
-    transaction: { create: jest.Mock };
+  let storage: jest.Mocked<WalletStorage>;
+  let gemini: Pick<GeminiDescriptionService, 'rewrite'> & {
+    rewrite: jest.Mock;
   };
 
   beforeEach(() => {
-    tx = {
-      user: { update: jest.fn(), updateMany: jest.fn() },
-      transaction: { create: jest.fn() },
+    storage = {
+      findUserByEmail: jest.fn(),
+      createUser: jest.fn(),
+      getBalance: jest.fn(),
+      getHistory: jest.fn(),
+      deposit: jest.fn(),
+      withdraw: jest.fn(),
+      transfer: jest.fn(),
     };
-    prisma = {
-      user: {
-        findUnique: jest.fn(),
-        update: jest.fn(),
-        updateMany: jest.fn(),
-      },
-      transaction: { create: jest.fn(), findMany: jest.fn() },
-      $transaction: jest.fn((callback) => callback(tx)),
-    };
-    service = new TransactionsService(prisma as unknown as PrismaService);
+    gemini = { rewrite: jest.fn().mockResolvedValue('Polished description') };
+    service = new TransactionsService(storage, gemini);
   });
 
   describe('deposit', () => {
-    it('increases the balance and records a deposit atomically', async () => {
-      tx.transaction.create.mockResolvedValue({
+    it('stores a valid deposit amount with two decimal places', async () => {
+      storage.deposit.mockResolvedValue({
         id: 'transaction-1',
-        amount: new Prisma.Decimal('25.50'),
+        userId: owner.id,
+        type: 'DEPOSIT',
+        amount: '25.50',
+        description: 'Tea',
+        counterpartyId: null,
+        createdAt: new Date().toISOString(),
       });
 
-      const result = await service.deposit(owner, amountDto(25.5));
+      const result = await service.deposit(owner, {
+        ...amountDto(25.5),
+        description: '  tea wagea  ',
+      });
 
-      expect(tx.user.update).toHaveBeenCalledWith({
-        where: { id: owner.id },
-        data: { balance: { increment: new Prisma.Decimal('25.5') } },
-      });
-      expect(tx.transaction.create).toHaveBeenCalledWith({
-        data: {
-          userId: owner.id,
-          type: 'DEPOSIT',
-          amount: new Prisma.Decimal('25.5'),
-        },
-      });
+      expect(gemini.rewrite).toHaveBeenCalledWith('tea wagea');
+      expect(storage.deposit).toHaveBeenCalledWith(
+        owner.id,
+        '25.50',
+        'Polished description',
+      );
       expect(result.amount).toBe('25.50');
     });
 
     it.each([0, -1, 1.239, Number.NaN, Number.POSITIVE_INFINITY, 10000000000])(
-      'rejects invalid amount %s without opening a transaction',
+      'rejects invalid amount %s without accessing storage',
       async (amount) => {
-        await expect(service.deposit(owner, amountDto(amount))).rejects.toThrow(
-          BadRequestException,
-        );
-        expect(prisma.$transaction).not.toHaveBeenCalled();
+        await expect(
+          service.deposit(owner, {
+            ...amountDto(amount),
+            description: 'tea',
+          }),
+        ).rejects.toThrow(BadRequestException);
+        expect(storage.deposit).not.toHaveBeenCalled();
+        expect(gemini.rewrite).not.toHaveBeenCalled();
       },
     );
   });
 
   describe('withdraw', () => {
-    it('decreases the balance and records a withdrawal when funds are available', async () => {
-      tx.user.updateMany.mockResolvedValue({ count: 1 });
-      tx.transaction.create.mockResolvedValue({
+    it('stores a valid withdrawal', async () => {
+      storage.withdraw.mockResolvedValue({
         id: 'transaction-2',
-        amount: new Prisma.Decimal('10.00'),
+        userId: owner.id,
+        type: 'WITHDRAW',
+        amount: '10.00',
+        description: 'Lunch',
+        counterpartyId: null,
+        createdAt: new Date().toISOString(),
       });
 
-      const result = await service.withdraw(owner, amountDto(10));
+      const result = await service.withdraw(owner, {
+        ...amountDto(10),
+        description: 'lunch',
+      });
 
-      expect(tx.user.updateMany).toHaveBeenCalledWith({
-        where: { id: owner.id, balance: { gte: new Prisma.Decimal(10) } },
-        data: { balance: { decrement: new Prisma.Decimal(10) } },
-      });
-      expect(tx.transaction.create).toHaveBeenCalledWith({
-        data: {
-          userId: owner.id,
-          type: 'WITHDRAW',
-          amount: new Prisma.Decimal(10),
-        },
-      });
+      expect(storage.withdraw).toHaveBeenCalledWith(
+        owner.id,
+        '10.00',
+        'Polished description',
+      );
       expect(result.amount).toBe('10.00');
     });
 
-    it('rejects withdrawal when the balance is insufficient and creates no record', async () => {
-      tx.user.updateMany.mockResolvedValue({ count: 0 });
-
-      await expect(service.withdraw(owner, amountDto(10))).rejects.toThrow(
-        'Insufficient funds',
+    it('rejects insufficient funds returned by storage', async () => {
+      storage.withdraw.mockRejectedValue(
+        new BadRequestException('Insufficient funds'),
       );
-      expect(tx.transaction.create).not.toHaveBeenCalled();
+
+      await expect(
+        service.withdraw(owner, { ...amountDto(10), description: 'lunch' }),
+      ).rejects.toThrow('Insufficient funds');
     });
 
-    it('rejects an amount with more than two decimal places', async () => {
-      await expect(service.withdraw(owner, amountDto(-0.01))).rejects.toThrow(
-        BadRequestException,
-      );
-      expect(prisma.$transaction).not.toHaveBeenCalled();
+    it('does not save a transaction if Gemini cannot rewrite the description', async () => {
+      gemini.rewrite.mockRejectedValue(new Error('Gemini unavailable'));
+
+      await expect(
+        service.withdraw(owner, { ...amountDto(10), description: 'lunch' }),
+      ).rejects.toThrow('Gemini unavailable');
+      expect(storage.withdraw).not.toHaveBeenCalled();
+    });
+
+    it('rejects invalid amounts before calling storage', async () => {
+      await expect(
+        service.withdraw(owner, {
+          ...amountDto(-0.01),
+          description: 'lunch',
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(storage.withdraw).not.toHaveBeenCalled();
     });
   });
 
@@ -123,79 +129,101 @@ describe('TransactionsService', () => {
       amount,
     });
 
-    it('moves funds and creates a matching record for both users', async () => {
-      prisma.user.findUnique.mockResolvedValue({ id: 'user-2' });
-      tx.user.updateMany.mockResolvedValue({ count: 1 });
-      tx.transaction.create
-        .mockResolvedValueOnce({
+    it('asks storage to transfer normalized funds for both users', async () => {
+      storage.transfer.mockResolvedValue([
+        {
           id: 'out-1',
-          amount: new Prisma.Decimal('7.25'),
-        })
-        .mockResolvedValueOnce({
+          userId: owner.id,
+          type: 'TRANSFER_OUT',
+          amount: '7.25',
+          description: 'Dinner',
+          counterpartyId: 'user-2',
+          createdAt: new Date().toISOString(),
+        },
+        {
           id: 'in-1',
-          amount: new Prisma.Decimal('7.25'),
-        });
+          userId: 'user-2',
+          type: 'TRANSFER_IN',
+          amount: '7.25',
+          description: 'Dinner',
+          counterpartyId: owner.id,
+          createdAt: new Date().toISOString(),
+        },
+      ]);
 
-      const result = await service.transfer(
-        owner,
-        transferDto('recipient@example.com', 7.25),
+      const result = await service.transfer(owner, {
+        recipientEmail: 'recipient@example.com',
+        amount: 7.25,
+        description: 'shared dinner',
+      });
+
+      expect(gemini.rewrite).toHaveBeenCalledWith('shared dinner');
+      expect(storage.transfer).toHaveBeenCalledWith(
+        owner.id,
+        owner.email,
+        'recipient@example.com',
+        '7.25',
+        'Polished description',
       );
-
-      expect(tx.user.updateMany).toHaveBeenCalledWith({
-        where: { id: owner.id, balance: { gte: new Prisma.Decimal('7.25') } },
-        data: { balance: { decrement: new Prisma.Decimal('7.25') } },
-      });
-      expect(tx.user.update).toHaveBeenCalledWith({
-        where: { id: 'user-2' },
-        data: { balance: { increment: new Prisma.Decimal('7.25') } },
-      });
-      expect(tx.transaction.create).toHaveBeenCalledTimes(2);
       expect(result.map((transaction) => transaction.amount)).toEqual([
         '7.25',
         '7.25',
       ]);
     });
 
-    it('rejects a transfer when the sender has insufficient funds', async () => {
-      prisma.user.findUnique.mockResolvedValue({ id: 'user-2' });
-      tx.user.updateMany.mockResolvedValue({ count: 0 });
+    it('rejects insufficient balance returned by storage', async () => {
+      storage.transfer.mockRejectedValue(
+        new BadRequestException('Insufficient funds'),
+      );
 
       await expect(
-        service.transfer(owner, transferDto('recipient@example.com', 10)),
+        service.transfer(owner, {
+          ...transferDto('recipient@example.com', 10),
+          description: 'dinner',
+        }),
       ).rejects.toThrow('Insufficient funds');
-      expect(tx.user.update).not.toHaveBeenCalled();
-      expect(tx.transaction.create).not.toHaveBeenCalled();
     });
 
-    it('rejects transfers to the same user without accessing the database', async () => {
+    it('rejects transfers to the same user', async () => {
+      storage.transfer.mockRejectedValue(
+        new BadRequestException('Cannot transfer to yourself'),
+      );
+
       await expect(
-        service.transfer(owner, transferDto(owner.email, 1)),
+        service.transfer(owner, {
+          ...transferDto(owner.email, 1),
+          description: 'dinner',
+        }),
       ).rejects.toThrow('Cannot transfer to yourself');
-      expect(prisma.user.findUnique).not.toHaveBeenCalled();
     });
 
-    it('reports a missing recipient without opening a transaction', async () => {
-      prisma.user.findUnique.mockResolvedValue(null);
+    it('reports a missing recipient returned by storage', async () => {
+      storage.transfer.mockRejectedValue(
+        new NotFoundException('Recipient not found'),
+      );
 
       await expect(
-        service.transfer(owner, transferDto('missing@example.com', 1)),
+        service.transfer(owner, {
+          ...transferDto('missing@example.com', 1),
+          description: 'dinner',
+        }),
       ).rejects.toThrow(NotFoundException);
-      expect(prisma.$transaction).not.toHaveBeenCalled();
     });
 
-    it('rejects invalid amounts before looking up a recipient', async () => {
+    it('rejects invalid amount before attempting a transfer', async () => {
       await expect(
-        service.transfer(owner, transferDto('recipient@example.com', 0)),
+        service.transfer(owner, {
+          ...transferDto('recipient@example.com', 0),
+          description: 'dinner',
+        }),
       ).rejects.toThrow(BadRequestException);
-      expect(prisma.user.findUnique).not.toHaveBeenCalled();
+      expect(storage.transfer).not.toHaveBeenCalled();
     });
   });
 
   describe('balance and history', () => {
-    it('returns a fixed two-decimal balance', async () => {
-      prisma.user.findUnique.mockResolvedValue({
-        balance: new Prisma.Decimal('12'),
-      });
+    it('returns the persisted wallet balance', async () => {
+      storage.getBalance.mockResolvedValue('12.00');
 
       await expect(service.getBalance(owner.id)).resolves.toEqual({
         balance: '12.00',
@@ -203,26 +231,31 @@ describe('TransactionsService', () => {
     });
 
     it('reports when the wallet owner does not exist', async () => {
-      prisma.user.findUnique.mockResolvedValue(null);
+      storage.getBalance.mockRejectedValue(
+        new NotFoundException('User not found'),
+      );
 
       await expect(service.getBalance(owner.id)).rejects.toThrow(
         NotFoundException,
       );
     });
 
-    it('returns only the latest 100 transactions with formatted amounts', async () => {
-      prisma.transaction.findMany.mockResolvedValue([
-        { id: 'transaction-3', amount: new Prisma.Decimal('3') },
-      ]);
+    it('returns the latest transaction history from storage', async () => {
+      const transactions = [
+        {
+          id: 'transaction-3',
+          userId: owner.id,
+          type: 'DEPOSIT' as const,
+          amount: '3.00',
+          description: 'Tea',
+          counterpartyId: null,
+          createdAt: new Date().toISOString(),
+        },
+      ];
+      storage.getHistory.mockResolvedValue(transactions);
 
-      const result = await service.getHistory(owner.id);
-
-      expect(prisma.transaction.findMany).toHaveBeenCalledWith({
-        where: { userId: owner.id },
-        orderBy: { createdAt: 'desc' },
-        take: 100,
-      });
-      expect(result[0].amount).toBe('3.00');
+      await expect(service.getHistory(owner.id)).resolves.toEqual(transactions);
+      expect(storage.getHistory).toHaveBeenCalledWith(owner.id);
     });
   });
 });

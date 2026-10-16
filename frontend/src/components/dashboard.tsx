@@ -9,7 +9,7 @@ import {
   getTransactions,
   type WalletTransaction,
 } from "@/lib/api";
-import { amountSchema } from "@/lib/validation";
+import { amountSchema, transactionDescriptionSchema } from "@/lib/validation";
 
 type Action = "deposit" | "withdraw";
 
@@ -20,6 +20,7 @@ export default function Dashboard() {
   const [balance, setBalance] = useState<string | null>(null);
   const [transactions, setTransactions] = useState<WalletTransaction[]>([]);
   const [amount, setAmount] = useState("");
+  const [description, setDescription] = useState("");
   const [action, setAction] = useState<Action>("deposit");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -83,13 +84,30 @@ export default function Dashboard() {
       setError(result.error.issues[0]?.message ?? "Enter a valid amount.");
       return;
     }
+    const descriptionResult =
+      transactionDescriptionSchema.safeParse(description);
+    if (!descriptionResult.success) {
+      setError(
+        descriptionResult.error.issues[0]?.message ??
+          "Write a short description.",
+      );
+      return;
+    }
 
     setBusy(true);
     try {
-      await createTransaction(token, action, result.data.amount);
+      await createTransaction(
+        token,
+        action,
+        result.data.amount,
+        descriptionResult.data,
+      );
       await refreshWallet(token);
       setAmount("");
-      setNotice(action === "deposit" ? "Deposit successful." : "Withdrawal successful.");
+      setDescription("");
+      setNotice(
+        action === "deposit" ? "Deposit successful." : "Withdrawal successful.",
+      );
     } catch (cause) {
       setError(
         cause instanceof ApiError
@@ -111,14 +129,19 @@ export default function Dashboard() {
     <main className="min-h-screen">
       <header className="border-b border-[#e7e9e2] bg-white">
         <div className="mx-auto flex h-[76px] max-w-6xl items-center justify-between px-5 sm:px-8">
-          <a className="flex items-center gap-3 font-semibold" href="/dashboard">
+          <a
+            className="flex items-center gap-3 font-semibold"
+            href="/dashboard"
+          >
             <span className="grid h-10 w-10 place-items-center rounded-xl bg-[#dceee3] text-[#286b53]">
               <WalletMark />
             </span>
             <span>Mini Wallet</span>
           </a>
           <div className="flex items-center gap-4">
-            <span className="hidden text-sm text-[#6e7d77] sm:block">{email}</span>
+            <span className="hidden text-sm text-[#6e7d77] sm:block">
+              {email}
+            </span>
             <button
               className="rounded-lg px-3 py-2 text-sm font-medium text-[#53645d] transition hover:bg-[#f5f5f0]"
               onClick={signOut}
@@ -165,7 +188,9 @@ export default function Dashboard() {
                 <p className="text-4xl font-semibold tracking-tight sm:text-5xl">
                   {balance === null ? "..." : `$${balance}`}
                 </p>
-                <p className="mt-3 text-sm text-white/65">Your money at a glance</p>
+                <p className="mt-3 text-sm text-white/65">
+                  Your money at a glance
+                </p>
               </div>
             </div>
           </article>
@@ -197,7 +222,10 @@ export default function Dashboard() {
               ))}
             </div>
             <form onSubmit={handleTransaction} noValidate>
-              <label className="mb-2 block text-sm font-medium" htmlFor="amount">
+              <label
+                className="mb-2 block text-sm font-medium"
+                htmlFor="amount"
+              >
                 Amount
               </label>
               <div className="flex h-12 items-center rounded-xl border border-[#dfe4dd] bg-white px-4 focus-within:border-[#286b53] focus-within:ring-4 focus-within:ring-[#286b53]/10">
@@ -215,6 +243,24 @@ export default function Dashboard() {
                   value={amount}
                 />
               </div>
+              <label
+                className="mb-2 mt-4 block text-sm font-medium"
+                htmlFor="description"
+              >
+                What is this for?
+              </label>
+              <input
+                className="h-12 w-full rounded-xl border border-[#dfe4dd] bg-white px-4 text-sm outline-none transition focus:border-[#286b53] focus:ring-4 focus:ring-[#286b53]/10"
+                id="description"
+                maxLength={300}
+                onChange={(event) => setDescription(event.target.value)}
+                placeholder="e.g. Chai aur nashta"
+                value={description}
+              />
+              <p className="mt-2 text-xs text-[#89948e]">
+                Sirf description Google Gemini ko saaf alfaaz mein rewrite
+                karne ke liye bheji jayegi.
+              </p>
               {notice && (
                 <p className="mt-3 text-sm text-[#286b53]" role="status">
                   {notice}
@@ -239,7 +285,9 @@ export default function Dashboard() {
           <div className="flex items-center justify-between border-b border-[#e7e9e2] px-6 py-5 sm:px-7">
             <div>
               <p className="text-sm font-medium text-[#286b53]">ACTIVITY</p>
-              <h2 className="mt-1 text-xl font-semibold">Recent transactions</h2>
+              <h2 className="mt-1 text-xl font-semibold">
+                Recent transactions
+              </h2>
             </div>
             <span className="text-xs text-[#89948e]">Latest 100</span>
           </div>
@@ -276,7 +324,8 @@ export default function Dashboard() {
                       </span>
                       <div className="min-w-0">
                         <p className="truncate text-sm font-medium">
-                          {transaction.type.replaceAll("_", " ").toLowerCase()}
+                          {transaction.description ??
+                            transaction.type.replaceAll("_", " ").toLowerCase()}
                         </p>
                         <p className="mt-1 text-xs text-[#89948e]">
                           {new Intl.DateTimeFormat("en", {

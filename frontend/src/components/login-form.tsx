@@ -83,7 +83,9 @@ export default function LoginForm() {
             {mode === "login" ? "WELCOME BACK" : "GET STARTED"}
           </p>
           <h2 className="mt-3 text-3xl font-semibold tracking-tight">
-            {mode === "login" ? "Sign in to your wallet" : "Create your account"}
+            {mode === "login"
+              ? "Sign in to your wallet"
+              : "Create your account"}
           </h2>
           <p className="mt-3 text-sm leading-6 text-[#6e7d77]">
             {mode === "login"
@@ -93,7 +95,9 @@ export default function LoginForm() {
 
           <form className="mt-8 space-y-5" onSubmit={handleSubmit} noValidate>
             <label className="block">
-              <span className="mb-2 block text-sm font-medium">Email address</span>
+              <span className="mb-2 block text-sm font-medium">
+                Email address
+              </span>
               <input
                 autoComplete="email"
                 className="h-12 w-full rounded-xl border border-[#dfe4dd] bg-white px-4 text-sm outline-none transition focus:border-[#286b53] focus:ring-4 focus:ring-[#286b53]/10"
@@ -107,7 +111,9 @@ export default function LoginForm() {
             <label className="block">
               <span className="mb-2 block text-sm font-medium">Password</span>
               <input
-                autoComplete={mode === "login" ? "current-password" : "new-password"}
+                autoComplete={
+                  mode === "login" ? "current-password" : "new-password"
+                }
                 className="h-12 w-full rounded-xl border border-[#dfe4dd] bg-white px-4 text-sm outline-none transition focus:border-[#286b53] focus:ring-4 focus:ring-[#286b53]/10"
                 onChange={(event) => setPassword(event.target.value)}
                 placeholder="At least 8 characters"
@@ -140,7 +146,9 @@ export default function LoginForm() {
           </form>
 
           <p className="mt-7 text-center text-sm text-[#6e7d77]">
-            {mode === "login" ? "New to Mini Wallet?" : "Already have an account?"}{" "}
+            {mode === "login"
+              ? "New to Mini Wallet?"
+              : "Already have an account?"}{" "}
             <button
               className="font-semibold text-[#286b53] hover:underline"
               onClick={() => {

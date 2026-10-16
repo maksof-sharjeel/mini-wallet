@@ -7,7 +7,9 @@ export class PrismaService
   implements OnModuleInit, OnModuleDestroy
 {
   async onModuleInit(): Promise<void> {
-    await this.$connect();
+    if (process.env.STORAGE_MODE !== 'json') {
+      await this.$connect();
+    }
   }
 
   async onModuleDestroy(): Promise<void> {

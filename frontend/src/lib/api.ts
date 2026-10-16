@@ -25,6 +25,7 @@ export interface WalletTransaction {
   id: string;
   type: "DEPOSIT" | "WITHDRAW" | "TRANSFER_IN" | "TRANSFER_OUT";
   amount: string;
+  description: string | null;
   counterpartyId: string | null;
   createdAt: string;
 }
@@ -50,7 +51,11 @@ async function request<T>(
         ? body.message
         : undefined;
     throw new ApiError(
-      Array.isArray(message) ? message.join(" ") : typeof message === "string" ? message : "Something went wrong. Please try again.",
+      Array.isArray(message)
+        ? message.join(" ")
+        : typeof message === "string"
+          ? message
+          : "Something went wrong. Please try again.",
       response.status,
     );
   }
@@ -84,10 +89,11 @@ export function createTransaction(
   token: string,
   action: "deposit" | "withdraw",
   amount: number,
+  description: string,
 ): Promise<WalletTransaction> {
   return request<WalletTransaction>(
     `/transactions/${action}`,
-    { method: "POST", body: JSON.stringify({ amount }) },
+    { method: "POST", body: JSON.stringify({ amount, description }) },
     token,
   );
 }
